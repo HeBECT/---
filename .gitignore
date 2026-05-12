@@ -1,0 +1,41 @@
+# Rust
+/kenshi-trade-map-rust/target/
+/kenshi-trade-map-rust/Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# User data
+*.json
+!kenshi-trade-map-rust/Cargo.json
+!kenshi-trade-map-web/package.json
+
+# Documentation builds
+/docs/_build/
+/site/

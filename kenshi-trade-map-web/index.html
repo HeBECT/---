@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenshi Trade Map - Интерактивная карта торговых маршрутов</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Панель управления -->
+        <div id="control-panel">
+            <h1>🗺️ Kenshi Trade Map</h1>
+            
+            <div class="control-section">
+                <h3>Управление картой</h3>
+                <button id="reset-view" class="btn">🔄 Сбросить вид</button>
+                <button id="toggle-grid" class="btn">📐 Сетка</button>
+            </div>
+
+            <div class="control-section">
+                <h3>Торговые маршруты</h3>
+                <button id="create-route" class="btn btn-primary">➕ Создать маршрут</button>
+                <button id="cancel-route" class="btn btn-danger" style="display:none;">❌ Отменить</button>
+                <div id="route-list"></div>
+            </div>
+
+            <div class="control-section">
+                <h3>Сохранение</h3>
+                <button id="save-routes" class="btn btn-success">💾 Сохранить</button>
+                <button id="load-routes" class="btn btn-info">📂 Загрузить</button>
+                <input type="file" id="file-input" accept=".json" style="display:none;">
+            </div>
+
+            <div class="control-section">
+                <h3>Информация</h3>
+                <div id="info-panel">
+                    <p><strong>Управление:</strong></p>
+                    <ul>
+                        <li>🖱️ ЛКМ + перетаскивание - перемещение</li>
+                        <li>🔍 Колесо мыши - масштаб</li>
+                        <li>🏙️ Клик по городу - выбор</li>
+                        <li>⌨️ Enter - завершить маршрут</li>
+                        <li>⌨️ Esc - отменить</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Холст карты -->
+        <div id="map-container">
+            <canvas id="map-canvas"></canvas>
+            
+            <!-- Контекстное меню для маршрута -->
+            <div id="route-context-menu" class="context-menu" style="display:none;">
+                <h4>Торговый маршрут</h4>
+                <div class="menu-section">
+                    <label>Название маршрута:</label>
+                    <input type="text" id="route-name-input" placeholder="Например: Хаб → Стоат">
+                </div>
+                <div class="menu-section">
+                    <label>Товар:</label>
+                    <select id="goods-select">
+                        <option value="">-- Выберите товар --</option>
+                        <option value="iron">Железная руда</option>
+                        <option value="copper">Медная руда</option>
+                        <option value="fabric">Ткань</option>
+                        <option value="leather">Кожа</option>
+                        <option value="food">Еда</option>
+                        <option value="sake">Саке</option>
+                        <option value="grog">Грог</option>
+                        <option value="building_materials">Стройматериалы</option>
+                        <option value="robotics">Робототехника</option>
+                        <option value="engineering">Инженерия</option>
+                    </select>
+                </div>
+                <div class="menu-section">
+                    <label>Наценка (%):</label>
+                    <input type="number" id="markup-input" value="0" min="-100" max="500">
+                </div>
+                <div class="menu-buttons">
+                    <button id="confirm-route" class="btn btn-success">✓ Создать</button>
+                    <button id="cancel-route-menu" class="btn btn-danger">✗ Отмена</button>
+                </div>
+            </div>
+
+            <!-- Всплывающая подсказка для маршрута -->
+            <div id="route-tooltip" class="tooltip" style="display:none;">
+                <h4 id="tooltip-title"></h4>
+                <div id="tooltip-content"></div>
+                <button id="delete-route" class="btn btn-danger btn-sm">🗑️ Удалить</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

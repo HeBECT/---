@@ -1,0 +1,371 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kenshi: Карта Торговых Путей</title>
+    <style>
+        :root {
+            --bg: #0e0e0e; --panel: #1a1a1a; --panel-header: #252525;
+            --text: #dcdcdc; --accent: #d4a437; --accent-hover: #f1c40f;
+            --route: #4caf50; --danger: #e74c3c; --border: #333;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; user-select: none; }
+        
+        #mapCanvas { display: block; cursor: grab; position: absolute; top: 0; left: 0; z-index: 1; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; }
+        #mapCanvas.grabbing { cursor: grabbing; }
+        #mapCanvas.crosshair { cursor: crosshair; }
+
+        .ui-layer { position: absolute; z-index: 10; pointer-events: none; }
+        .ui-layer > * { pointer-events: auto; }
+
+        #loaderOverlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(14,14,14,0.98); display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 100; transition: opacity 0.5s; }
+        #loaderOverlay.hidden { opacity: 0; pointer-events: none; }
+        .drop-zone { width: 500px; padding: 50px; border: 3px dashed var(--accent); border-radius: 20px; text-align: center; background: rgba(212,164,55,0.05); }
+        .drop-zone h2 { color: var(--accent); margin-top: 0; font-size: 28px; }
+        .drop-zone p { color: #888; line-height: 1.5; }
+        .btn { background: var(--accent); color: #000; border: none; padding: 12px 24px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; font-size: 16px; }
+        .btn:hover { background: var(--accent-hover); transform: translateY(-2px); }
+        .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 4px; }
+        .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+        .btn-danger:hover { background: var(--danger); color: white; }
+
+        #toolbar { position: absolute; top: 20px; left: 20px; display: flex; gap: 10px; z-index: 10; }
+        .tool-btn { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 10px 15px; cursor: pointer; border-radius: 6px; font-size: 14px; transition: 0.2s; }
+        .tool-btn:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(212,164,55,0.3); }
+        .tool-btn:active { transform: translateY(0); }
+
+        #contextMenu { position: absolute; display: none; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.8); overflow: hidden; min-width: 220px; z-index: 50; }
+        #contextMenu div { padding: 14px 20px; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+        #contextMenu div:hover { background: var(--accent); color: #000; }
+
+        #creationHint { display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.95); padding: 15px 30px; border-radius: 10px; border: 1px solid var(--accent); box-shadow: 0 0 20px rgba(212,164,55,0.2); font-size: 16px; z-index: 50; }
+
+        #routeNameModal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--panel); padding: 30px; border: 2px solid var(--accent); border-radius: 12px; z-index: 60; text-align: center; min-width: 350px; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
+        #routeNameModal input { padding: 12px; margin: 15px 0; width: 90%; font-size: 18px; background: #2a2a2a; color: white; border: 1px solid var(--border); border-radius: 6px; outline: none; }
+        #routeNameModal input:focus { border-color: var(--accent); }
+
+        #sidePanel { position: absolute; top: 0; right: 0; width: 420px; height: 100%; background: var(--panel); border-left: 2px solid var(--border); transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; z-index: 20; box-shadow: -10px 0 30px rgba(0,0,0,0.5); }
+        #sidePanel.open { transform: translateX(0); }
+        .panel-header { padding: 20px; background: var(--panel-header); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .panel-header h3 { margin: 0; color: var(--accent); font-size: 18px; }
+        .close-btn { background: none; border: none; color: #666; font-size: 28px; cursor: pointer; transition: 0.2s; }
+        .close-btn:hover { color: var(--danger); transform: rotate(90deg); }
+        .panel-content { padding: 20px; overflow-y: auto; flex-grow: 1; }
+        .segment-info { font-size: 14px; color: #aaa; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border); font-weight: bold; }
+
+        .trade-table { width: 100%; border-collapse: collapse; }
+        .trade-table th { text-align: left; color: var(--accent); font-size: 12px; padding: 8px 5px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 1px; }
+        .trade-table td { padding: 10px 5px; border-bottom: 1px solid #222; vertical-align: middle; }
+        .trade-table input { width: 100%; background: #2a2a2a; color: white; border: 1px solid #444; padding: 8px; border-radius: 4px; font-size: 14px; }
+        .trade-table input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 5px rgba(212,164,55,0.3); }
+        .final-price { color: var(--route); font-weight: bold; font-size: 15px; text-align: center; }
+        .add-row-btn { margin-top: 20px; width: 100%; background: #222; color: var(--accent); border: 1px dashed var(--accent); cursor: pointer; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 16px; transition: 0.2s; }
+        .add-row-btn:hover { background: #2a2a2a; transform: translateY(-1px); }
+    </style>
+</head>
+<body>
+<canvas id="mapCanvas"></canvas>
+<div id="loaderOverlay">
+    <div class="drop-zone">
+        <h2>🏴‍☠️ KENSHI TRADE MAP</h2>
+        <p>Перетащите изображение карты сюда<br>или нажмите кнопку ниже, чтобы начать</p>
+        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        <button class="btn" onclick="document.getElementById('fileInput').click()">Загрузить карту</button>
+    </div>
+</div>
+<div class="ui-layer" id="toolbar">
+    <button class="tool-btn" onclick="document.getElementById('fileInput').click()">📁 Загрузить карту</button>
+</div>
+<div id="contextMenu">
+    <div onclick="startRouteCreation()">🛣️ Создать маршрут</div>
+</div>
+<div id="creationHint">ЛКМ по городу — добавить точку | <b>Enter</b> — завершить | <b>Esc</b> — отмена</div>
+<div id="routeNameModal">
+    <h3 style="color: var(--accent); margin-top:0;">Сохранение пути</h3>
+    <input type="text" id="routeNameInput" placeholder="Название маршрута">
+    <br>
+    <button class="btn" onclick="confirmRouteCreation()" style="width: 100%; margin-top: 10px;">Подтвердить</button>
+</div>
+<div id="sidePanel">
+    <div class="panel-header">
+        <h3 id="panelTitle">Торговый путь</h3>
+        <button class="close-btn" onclick="closeSidePanel()">&times;</button>
+    </div>
+    <div class="panel-content">
+        <div class="segment-info" id="segmentInfo">Отрезок: Город А ➔ Город Б</div>
+        <table class="trade-table">
+            <thead>
+                <tr>
+                    <th style="width: 35%">Товар</th>
+                    <th style="width: 20%">База</th>
+                    <th style="width: 15%">Наценка %</th>
+                    <th style="width: 20%">Итог</th>
+                    <th style="width: 10%"></th>
+                </tr>
+            </thead>
+            <tbody id="tradeTableBody"></tbody>
+        </table>
+        <button class="add-row-btn" onclick="addTradeRow()">+ Добавить товар</button>
+    </div>
+</div>
+<script>
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+let mapImage = null;
+const camera = { x: 0, y: 0, zoom: 1 };
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+let WORLD_W = 3000, WORLD_H = 2000;
+const cities = [
+    { id: 1, name: "Хаб", x: 600, y: 800 },
+    { id: 2, name: "Сквин", x: 850, y: 650 },
+    { id: 3, name: "Акула", x: 450, y: 1100 },
+    { id: 4, name: "Блистер Хилл", x: 900, y: 400 },
+    { id: 5, name: "Стэк", x: 1100, y: 350 },
+    { id: 6, name: "Монгрел", x: 1700, y: 350 },
+    { id: 7, name: "Хенг", x: 1600, y: 1000 },
+    { id: 8, name: "Катун", x: 1300, y: 1150 },
+    { id: 9, name: "Шо-Баттай", x: 750, y: 350 },
+    { id: 10, name: "Дрин", x: 700, y: 1100 }
+];
+let routes = [];
+let currentRoutePoints = []; 
+let isCreatingRoute = false;
+let hoveredCity = null;
+let activeSegment = null; 
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize);
+resize();
+const fileInput = document.getElementById('fileInput');
+document.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('drop', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if(e.dataTransfer.files.length > 0) handleMapFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', (e) => { if(e.target.files.length > 0) handleMapFile(e.target.files[0]); });
+function handleMapFile(file) {
+    if(!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            mapImage = img;
+            WORLD_W = img.naturalWidth; WORLD_H = img.naturalHeight;
+            const zoomX = canvas.width / WORLD_W;
+            const zoomY = canvas.height / WORLD_H;
+            camera.zoom = Math.min(zoomX, zoomY) * 0.9; 
+            const screenXForOrigin = (canvas.width - WORLD_W * camera.zoom) / 2;
+            const screenYForOrigin = (canvas.height - WORLD_H * camera.zoom) / 2;
+            camera.x = -screenXForOrigin / camera.zoom;
+            camera.y = -screenYForOrigin / camera.zoom;
+            document.getElementById('loaderOverlay').classList.add('hidden');
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+function w2s(wx, wy) { return { x: (wx - camera.x) * camera.zoom, y: (wy - camera.y) * camera.zoom }; }
+function s2w(sx, sy) { return { x: sx / camera.zoom + camera.x, y: sy / camera.zoom + camera.y }; }
+let time = 0;
+function draw() {
+    time += 0.02;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (mapImage) {
+        const p = w2s(0, 0);
+        ctx.drawImage(mapImage, p.x, p.y, WORLD_W * camera.zoom, WORLD_H * camera.zoom);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#151515'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#555'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText("Загрузите карту Kenshi", canvas.width/2, canvas.height/2);
+    }
+    routes.forEach(r => drawLine(r.points, r.color, 6, false));
+    if(isCreatingRoute && currentRoutePoints.length > 0) drawLine(currentRoutePoints, '#ffeb3b', 4, true);
+    cities.forEach(c => {
+        const p = w2s(c.x, c.y);
+        const isHover = c === hoveredCity;
+        const baseR = 6;
+        const r = baseR * camera.zoom;
+        if(isHover) {
+            const pulse = Math.sin(time * 5) * 10 + 20;
+            ctx.beginPath(); ctx.arc(p.x, p.y, r + pulse * camera.zoom, 0, Math.PI*2); 
+            ctx.fillStyle = 'rgba(212, 164, 55, 0.15)'; ctx.fill();
+            ctx.beginPath(); ctx.arc(p.x, p.y, r + 5 * camera.zoom, 0, Math.PI*2); 
+            ctx.strokeStyle = 'rgba(212, 164, 55, 0.6)'; ctx.lineWidth = 2; ctx.stroke();
+        }
+        ctx.font = old Name{Math.max(12, 14*camera.zoom)}px sans-serif;
+        ctx.textAlign = 'center'; 
+        ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 4*camera.zoom; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 1;
+        ctx.fillStyle = isHover ? '#fff' : '#e0e0e0';
+        ctx.fillText(c.name, p.x, p.y - r - 8*camera.zoom);
+        ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2);
+        ctx.fillStyle = isHover ? '#fff' : '#d4a437';
+        ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2*camera.zoom; ctx.stroke();
+    });
+    requestAnimationFrame(draw);
+}
+function drawLine(pts, color, width, isTemp) {
+    if(pts.length < 2) return;
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width * camera.zoom;
+    ctx.setLineDash(isTemp ? [10*camera.zoom, 10*camera.zoom] : []);
+    ctx.shadowBlur = 15*camera.zoom; ctx.shadowColor = color; 
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    let p = w2s(pts[0].x, pts[0].y); ctx.moveTo(p.x, p.y);
+    for(let i=1; i<pts.length; i++) { p = w2s(pts[i].x, pts[i].y); ctx.lineTo(p.x, p.y); }
+    ctx.stroke(); ctx.shadowBlur = 0; ctx.setLineDash([]);
+}
+canvas.addEventListener('mousedown', (e) => {
+    if(e.target !== canvas) return;
+    if(e.button === 2) {
+        const wp = s2w(e.offsetX, e.offsetY);
+        hoveredCity = getCityAt(wp.x, wp.y);
+        if(hoveredCity) showCtxMenu(e.clientX, e.clientY); else hideCtxMenu();
+        return;
+    }
+    if(e.button === 0) {
+        hideCtxMenu();
+        const wp = s2w(e.offsetX, e.offsetY);
+        const city = getCityAt(wp.x, wp.y);
+        if(isCreatingRoute) {
+            if(city) currentRoutePoints.push({x: city.x, y: city.y, name: city.name});
+        } else {
+            const seg = getRouteSegmentAt(wp.x, wp.y);
+            if(seg) {
+                pinSegment(seg); 
+            } else if (!city) {
+                closeSidePanel();
+                isDragging = true; canvas.classList.add('grabbing');
+                dragStart.x = e.offsetX; dragStart.y = e.offsetY;
+            }
+        }
+    }
+});
+canvas.addEventListener('mousemove', (e) => {
+    if(isDragging) {
+        camera.x -= (e.offsetX - dragStart.x) / camera.zoom;
+        camera.y -= (e.offsetY - dragStart.y) / camera.zoom;
+        dragStart.x = e.offsetX; dragStart.y = e.offsetY;
+        return;
+    }
+    const wp = s2w(e.offsetX, e.offsetY);
+    hoveredCity = getCityAt(wp.x, wp.y);
+});
+canvas.addEventListener('mouseup', () => { isDragging = false; canvas.classList.remove('grabbing'); });
+canvas.addEventListener('wheel', (e) => {
+    const zf = e.deltaY < 0 ? 1.1 : 0.9;
+    const wp = s2w(e.offsetX, e.offsetY);
+    camera.zoom = Math.max(0.1, Math.min(8, camera.zoom * zf));
+    camera.x = wp.x - (e.offsetX / camera.zoom);
+    camera.y = wp.y - (e.offsetY / camera.zoom);
+});
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+window.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter' && isCreatingRoute) finishRoute();
+    else if(e.key === 'Escape') { cancelRoute(); hideCtxMenu(); }
+});
+function getCityAt(wx, wy) { 
+    const t = 30; 
+    return cities.find(c => Math.hypot(c.x - wx, c.y - wy) < t); 
+}
+function getRouteSegmentAt(wx, wy) {
+    const t = 20;
+    for(let r=0; r<routes.length; r++) {
+        const route = routes[r];
+        for(let i=0; i<route.points.length-1; i++) {
+            if(distToSeg(wx, wy, route.points[i].x, route.points[i].y, route.points[i+1].x, route.points[i+1].y) < t)
+                return { routeId: route.id, segmentIndex: i };
+        }
+    }
+    return null;
+}
+function distToSeg(px,py,x1,y1,x2,y2) { const dx=x2-x1,dy=y2-y1,t=Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/(dx*dx+dy*dy))); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
+function startRouteCreation() {
+    if(!hoveredCity) return;
+    isCreatingRoute = true; canvas.classList.add('crosshair');
+    currentRoutePoints = [{x: hoveredCity.x, y: hoveredCity.y, name: hoveredCity.name}];
+    document.getElementById('creationHint').style.display = 'block';
+    hideCtxMenu();
+}
+function finishRoute() {
+    if(currentRoutePoints.length < 2) { alert("Маршрут должен содержать минимум 2 города!"); return; }
+    document.getElementById('routeNameModal').style.display = 'block';
+    document.getElementById('routeNameInput').focus();
+}
+function confirmRouteCreation() {
+    const name = document.getElementById('routeNameInput').value || Путь Name{routes.length+1};
+    const colors = ['#4caf50', '#2196f3', '#ff9800', '#e91e63', '#00bcd4'];
+    routes.push({ id: Date.now(), name, points: [...currentRoutePoints], segments: {}, color: colors[routes.length % colors.length] });
+    cancelRoute();
+    document.getElementById('routeNameModal').style.display = 'none';
+    document.getElementById('routeNameInput').value = '';
+}
+function cancelRoute() { isCreatingRoute=false; currentRoutePoints=[]; canvas.classList.remove('crosshair'); document.getElementById('creationHint').style.display='none'; }
+function showCtxMenu(x,y) { const m=document.getElementById('contextMenu'); m.style.left=x+'px'; m.style.top=y+'px'; m.style.display='block'; }
+function hideCtxMenu() { document.getElementById('contextMenu').style.display='none'; }
+function pinSegment(segData) {
+    activeSegment = segData;
+    const route = routes.find(r => r.id === segData.routeId);
+    if(!route) return;
+    document.getElementById('panelTitle').innerText = route.name;
+    const from = route.points[segData.segmentIndex].name;
+    const to = route.points[segData.segmentIndex+1].name;
+    document.getElementById('segmentInfo').innerText = Отрезок: Name{from} ➔ Name{to};
+    document.getElementById('sidePanel').classList.add('open');
+    renderTradeTable();
+}
+function closeSidePanel() { document.getElementById('sidePanel').classList.remove('open'); activeSegment=null; }
+function renderTradeTable() {
+    if(!activeSegment) return;
+    const route = routes.find(r => r.id === activeSegment.routeId);
+    const idx = activeSegment.segmentIndex;
+    if(!route.segments[idx]) route.segments[idx] = [];
+    const tbody = document.getElementById('tradeTableBody');
+    tbody.innerHTML = '';
+    route.segments[idx].forEach((item, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = 
+            <td><input type="text" value="Name{item.name}" oninput="updateItemName(Name{i}, this.value)" placeholder="Товар"></td>
+            <td><input type="number" value="Name{item.base}" oninput="calcPrice(Name{i})" id="baseName{i}" placeholder="База"></td>
+            <td><input type="number" value="Name{item.markup}" oninput="calcPrice(Name{i})" id="markupName{i}" placeholder="%"></td>
+            <td class="final-price" id="finalName{i}">Name{item.final}c</td>
+            <td><button class="btn-sm btn-danger" onclick="deleteItem(Name{i})">✖</button></td>
+        ;
+        tbody.appendChild(tr);
+    });
+}
+function addTradeRow() {
+    if(!activeSegment) return;
+    const route = routes.find(r => r.id === activeSegment.routeId);
+    const idx = activeSegment.segmentIndex;
+    route.segments[idx].push({ name: "", base: 0, markup: 0, final: 0 });
+    renderTradeTable();
+    const inputs = document.querySelectorAll('#tradeTableBody input[type="text"]');
+    if(inputs.length > 0) inputs[inputs.length - 1].focus();
+}
+function updateItemName(i, val) {
+    const route = routes.find(r => r.id === activeSegment.routeId);
+    route.segments[activeSegment.segmentIndex][i].name = val;
+}
+function calcPrice(i) {
+    const route = routes.find(r => r.id === activeSegment.routeId);
+    const item = route.segments[activeSegment.segmentIndex][i];
+    const baseVal = parseFloat(document.getElementById(aseName{i}).value) || 0;
+    const markupVal = parseFloat(document.getElementById(markupName{i}).value) || 0;
+    item.base = baseVal;
+    item.markup = markupVal;
+    item.final = Math.round(baseVal + (baseVal * markupVal / 100));
+    document.getElementById(inalName{i}).innerText = item.final + 'c';
+}
+function deleteItem(i) {
+    const route = routes.find(r => r.id === activeSegment.routeId);
+    route.segments[activeSegment.segmentIndex].splice(i, 1);
+    renderTradeTable();
+}
+draw();
+</script>
+</body>
+</html>
