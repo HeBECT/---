@@ -35,6 +35,10 @@ struct TradeItem {
     name: String,
     buy_markup: f32,   // Наценка покупки %
     sell_markup: f32,  // Наценка продажи %
+    #[serde(default)]
+    hold: bool,        // Придержать
+    #[serde(default)]
+    sell: bool,        // Продавать
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -419,7 +423,7 @@ impl KenshiTradeMap {
     }
 
     fn handle_input(&mut self, response: &egui::Response, center: Pos2, ctx: &egui::Context) {
-        // Zoom with normalized and slower speed
+        // Zoom with normalized and slower speed, centered on cursor
         if let Some(hover_pos) = response.hover_pos() {
             let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
             if scroll_delta != 0.0 {
@@ -430,14 +434,18 @@ impl KenshiTradeMap {
                 let zoom_speed = 1.0 + (normalized_delta / 500.0);
                 let zoom_factor = zoom_speed.clamp(0.92, 1.08);
                 
-                let old_zoom = self.camera.zoom;
+                // Сохраняем мировую позицию под курсором
+                let world_pos_before = self.camera.screen_to_world(hover_pos, center);
+                
+                // Применяем новый зум
                 self.camera.target_zoom = (self.camera.target_zoom * zoom_factor).clamp(0.1, 3.0);
                 
-                // Плавная корректировка позиции при зуме
-                let world_pos = self.camera.screen_to_world(hover_pos, center);
-                let new_screen_pos = self.camera.world_to_screen(world_pos, center);
-                let offset_adjustment = (hover_pos - new_screen_pos) * (self.camera.target_zoom / old_zoom - 1.0);
-                self.camera.offset += offset_adjustment * 0.12;
+                // Корректируем offset так, чтобы мировая позиция под курсором осталась на месте
+                // Вычисляем где будет эта точка после зума
+                let world_pos_after_screen = self.camera.world_to_screen(world_pos_before, center);
+                
+                // Смещаем offset чтобы компенсировать разницу
+                self.camera.offset += hover_pos - world_pos_after_screen;
             }
         }
 
@@ -534,7 +542,7 @@ impl KenshiTradeMap {
                 // Смещаем маршрут перпендикулярно линии между городами
                 let direction = (end_point - start_point).normalized();
                 let perpendicular = Vec2::new(-direction.y, direction.x);
-                let offset_distance = 30.0 * (existing_routes_count as f32);
+                let offset_distance = 15.0 * (existing_routes_count as f32); // Уменьшено с 30 до 15
                 let offset = perpendicular * offset_distance;
                 
                 start_point += offset;
@@ -644,6 +652,12 @@ impl KenshiTradeMap {
                             });
                             
                             ui.horizontal(|ui| {
+                                ui.checkbox(&mut item.hold, "Придержать");
+                                ui.add_space(10.0);
+                                ui.checkbox(&mut item.sell, "Продавать");
+                            });
+                            
+                            ui.horizontal(|ui| {
                                 ui.add_space(ui.available_width() - 30.0);
                                 if ui.button("✖").clicked() {
                                     to_remove = Some(idx);
@@ -664,6 +678,8 @@ impl KenshiTradeMap {
                         name: String::new(),
                         buy_markup: 0.0,
                         sell_markup: 0.0,
+                        hold: false,
+                        sell: false,
                     });
                 }
                 
