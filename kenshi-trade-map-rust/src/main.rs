@@ -33,7 +33,8 @@ struct City {
 #[derive(Clone, Serialize, Deserialize)]
 struct TradeItem {
     name: String,
-    markup: f32,
+    buy_markup: f32,   // Наценка покупки %
+    sell_markup: f32,  // Наценка продажи %
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -517,11 +518,34 @@ impl KenshiTradeMap {
                 self.route_name_input.clone()
             };
 
+            // Проверяем, есть ли уже маршруты между этими городами
+            let existing_routes_count = self.routes.iter()
+                .filter(|r| {
+                    (r.start_city_name == start_city.name && r.end_city_name == end_city.name) ||
+                    (r.start_city_name == end_city.name && r.end_city_name == start_city.name)
+                })
+                .count();
+
+            // Вычисляем смещение для маршрута
+            let mut start_point = Pos2::new(start_city.x, start_city.y);
+            let mut end_point = Pos2::new(end_city.x, end_city.y);
+            
+            if existing_routes_count > 0 {
+                // Смещаем маршрут перпендикулярно линии между городами
+                let direction = (end_point - start_point).normalized();
+                let perpendicular = Vec2::new(-direction.y, direction.x);
+                let offset_distance = 30.0 * (existing_routes_count as f32);
+                let offset = perpendicular * offset_distance;
+                
+                start_point += offset;
+                end_point += offset;
+            }
+
             let route = TradeRoute {
                 id: self.routes.len(),
                 name,
-                start_point: Pos2::new(start_city.x, start_city.y),
-                end_point: Pos2::new(end_city.x, end_city.y),
+                start_point,
+                end_point,
                 start_city_name: start_city.name.clone(),
                 end_city_name: end_city.name.clone(),
                 color: [self.route_color.r(), self.route_color.g(), self.route_color.b()],
@@ -610,8 +634,13 @@ impl KenshiTradeMap {
                             });
                             
                             ui.horizontal(|ui| {
-                                ui.label("Наценка %:");
-                                ui.add(egui::DragValue::new(&mut item.markup).speed(0.5));
+                                ui.label("Наценка Покупки %:");
+                                ui.add(egui::DragValue::new(&mut item.buy_markup).speed(0.5));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Наценка Продажи %:");
+                                ui.add(egui::DragValue::new(&mut item.sell_markup).speed(0.5));
                             });
                             
                             ui.horizontal(|ui| {
@@ -633,7 +662,8 @@ impl KenshiTradeMap {
                 if ui.button("+ Добавить товар").clicked() {
                     route.items.push(TradeItem {
                         name: String::new(),
-                        markup: 0.0,
+                        buy_markup: 0.0,
+                        sell_markup: 0.0,
                     });
                 }
                 
