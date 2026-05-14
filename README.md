@@ -97,7 +97,7 @@
 
 #### Вариант 1: Скачать готовый релиз (рекомендуется)
 
-1. Перейдите в [Releases](https://github.com/yourusername/kenshi-trade-map/releases)
+1. Перейдите в [Releases](https://github.com/HeBECT/kenshi-trade-map/releases)
 2. Скачайте последнюю версию для вашей ОС
 3. Распакуйте архив
 4. Запустите `kenshi-trade-map.exe` (Windows) или `kenshi-trade-map` (Linux/macOS)
