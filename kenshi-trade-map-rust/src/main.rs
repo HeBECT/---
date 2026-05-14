@@ -3,6 +3,147 @@ use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 
+// Встроенная ватермарка - изображение встроено в исполняемый файл
+// Это изображение нельзя удалить или изменить без перекомпиляции
+const WATERMARK_BYTES: &[u8] = include_bytes!("png.png");
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+enum Language {
+    Russian,
+    English,
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+enum Theme {
+    Dark,
+    Light,
+}
+
+struct Texts {
+    // Top panel
+    title: &'static str,
+    load_map: &'static str,
+    add_city: &'static str,
+    save: &'static str,
+    load: &'static str,
+    cities: &'static str,
+    routes: &'static str,
+    zoom: &'static str,
+    language: &'static str,
+    theme: &'static str,
+    
+    // Route dialog
+    new_route: &'static str,
+    route_name: &'static str,
+    route_color: &'static str,
+    create: &'static str,
+    cancel: &'static str,
+    
+    // City dialog
+    new_city: &'static str,
+    city_name: &'static str,
+    confirm: &'static str,
+    
+    // Trade panel
+    trade_route: &'static str,
+    item: &'static str,
+    buy_markup: &'static str,
+    sell_markup: &'static str,
+    hold: &'static str,
+    sell: &'static str,
+    add_item: &'static str,
+    delete_route: &'static str,
+    close: &'static str,
+    
+    // Hints
+    hint_route: &'static str,
+    hint_city: &'static str,
+    
+    // Map
+    load_map_prompt: &'static str,
+}
+
+impl Texts {
+    fn get(lang: Language) -> Self {
+        match lang {
+            Language::Russian => Self {
+                title: "Kenshi Trade Map",
+                load_map: "Загрузить карту",
+                add_city: "Добавить город",
+                save: "Сохранить",
+                load: "Загрузить",
+                cities: "Городов",
+                routes: "Маршрутов",
+                zoom: "Зум",
+                language: "Language",
+                theme: "Тема",
+                
+                new_route: "Новый маршрут",
+                route_name: "Название маршрута:",
+                route_color: "Цвет маршрута:",
+                create: "Создать",
+                cancel: "Отмена",
+                
+                new_city: "Новый город",
+                city_name: "Название города:",
+                confirm: "Подтвердить",
+                
+                trade_route: "Торговый маршрут",
+                item: "Товар:",
+                buy_markup: "Наценка Покупки %:",
+                sell_markup: "Наценка Продажи %:",
+                hold: "Придержать",
+                sell: "Продавать",
+                add_item: "+ Добавить товар",
+                delete_route: "Удалить маршрут",
+                close: "Закрыть",
+                
+                hint_route: "ЛКМ по городу — выбрать конец маршрута | Esc — отмена",
+                hint_city: "ЛКМ на карте — разместить город | Esc — отмена",
+                
+                load_map_prompt: "Загрузите карту Kenshi",
+            },
+            Language::English => Self {
+                title: "Kenshi Trade Map",
+                load_map: "Load Map",
+                add_city: "Add City",
+                save: "Save",
+                load: "Load",
+                cities: "Cities",
+                routes: "Routes",
+                zoom: "Zoom",
+                language: "Язык",
+                theme: "Theme",
+                
+                new_route: "New Route",
+                route_name: "Route name:",
+                route_color: "Route color:",
+                create: "Create",
+                cancel: "Cancel",
+                
+                new_city: "New City",
+                city_name: "City name:",
+                confirm: "Confirm",
+                
+                trade_route: "Trade Route",
+                item: "Item:",
+                buy_markup: "Buy Markup %:",
+                sell_markup: "Sell Markup %:",
+                hold: "Hold",
+                sell: "Sell",
+                add_item: "+ Add Item",
+                delete_route: "Delete Route",
+                close: "Close",
+                
+                hint_route: "LMB on city — select end | Esc — cancel",
+                hint_city: "LMB on map — place city | Esc — cancel",
+                
+                load_map_prompt: "Load Kenshi map",
+            },
+        }
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -53,6 +194,10 @@ struct TradeRoute {
     end_city_name: String,
     color: [u8; 3],
     items: Vec<TradeItem>,
+    #[serde(default)]
+    offset_x: f32,  // Смещение по X для дублирующихся маршрутов
+    #[serde(default)]
+    offset_y: f32,  // Смещение по Y для дублирующихся маршрутов
 }
 
 struct Camera {
@@ -110,6 +255,13 @@ struct KenshiTradeMap {
     // Trade panel
     show_trade_panel: bool,
     active_route_id: Option<usize>,
+    
+    // Language & Theme
+    language: Language,
+    theme: Theme,
+    
+    // Watermark
+    watermark_texture: Option<egui::TextureHandle>,
 }
 
 impl Default for KenshiTradeMap {
@@ -135,6 +287,9 @@ impl Default for KenshiTradeMap {
             pending_city_pos: None,
             show_trade_panel: false,
             active_route_id: None,
+            language: Language::Russian,
+            theme: Theme::Dark,
+            watermark_texture: None,
         }
     }
 }
@@ -143,37 +298,60 @@ impl eframe::App for KenshiTradeMap {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.camera.update_smooth_zoom();
 
-        // Top panel - темная тема
+        // Apply theme
+        match self.theme {
+            Theme::Dark => ctx.set_visuals(egui::Visuals::dark()),
+            Theme::Light => ctx.set_visuals(egui::Visuals::light()),
+        }
+
+        let texts = Texts::get(self.language);
+
+        // Top panel
         egui::TopBottomPanel::top("top_panel")
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading("🏴‍☠️ Kenshi Trade Map");
+                    ui.heading(texts.title);
                     ui.separator();
                     
-                    if ui.button("📁 Загрузить карту").clicked() {
+                    if ui.button(texts.load_map).clicked() {
                         self.load_map_dialog(ctx);
                     }
                     
                     ui.separator();
                     
-                    if ui.button("🏙️ Добавить город").clicked() {
+                    if ui.button(texts.add_city).clicked() {
                         self.state = AppState::PlacingCity;
                     }
                     
                     ui.separator();
                     
-                    if ui.button("💾 Сохранить").clicked() {
+                    if ui.button(texts.save).clicked() {
                         self.save_data();
                     }
                     
-                    if ui.button("📂 Загрузить").clicked() {
+                    if ui.button(texts.load).clicked() {
                         self.load_data();
                     }
                     
                     ui.separator();
-                    ui.label(format!("Городов: {}", self.cities.len()));
-                    ui.label(format!("Маршрутов: {}", self.routes.len()));
-                    ui.label(format!("Зум: {:.1}x", self.camera.zoom));
+                    ui.label(format!("{}: {}", texts.cities, self.cities.len()));
+                    ui.label(format!("{}: {}", texts.routes, self.routes.len()));
+                    ui.label(format!("{}: {:.1}x", texts.zoom, self.camera.zoom));
+                    
+                    ui.separator();
+                    if ui.button(texts.language).clicked() {
+                        self.language = match self.language {
+                            Language::Russian => Language::English,
+                            Language::English => Language::Russian,
+                        };
+                    }
+                    
+                    if ui.button(texts.theme).clicked() {
+                        self.theme = match self.theme {
+                            Theme::Dark => Theme::Light,
+                            Theme::Light => Theme::Dark,
+                        };
+                    }
                 });
             });
 
@@ -187,8 +365,13 @@ impl eframe::App for KenshiTradeMap {
         }
 
         // Main canvas
+        let bg_color = match self.theme {
+            Theme::Dark => Color32::from_rgb(20, 20, 25),
+            Theme::Light => Color32::from_rgb(240, 240, 245),
+        };
+        
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::from_rgb(20, 20, 25)))
+            .frame(egui::Frame::none().fill(bg_color))
             .show(ctx, |ui| {
                 let (response, painter) = ui.allocate_painter(
                     ui.available_size(),
@@ -198,8 +381,8 @@ impl eframe::App for KenshiTradeMap {
                 let rect = response.rect;
                 let center = rect.center();
 
-                // Background - темный
-                painter.rect_filled(rect, 0.0, Color32::from_rgb(20, 20, 25));
+                // Background
+                painter.rect_filled(rect, 0.0, bg_color);
 
                 // Draw map if loaded
                 if let Some(texture) = &self.map_texture {
@@ -219,7 +402,7 @@ impl eframe::App for KenshiTradeMap {
                     painter.text(
                         center,
                         egui::Align2::CENTER_CENTER,
-                        "Загрузите карту Kenshi",
+                        texts.load_map_prompt,
                         egui::FontId::proportional(24.0),
                         Color32::from_rgb(150, 150, 150),
                     );
@@ -288,8 +471,8 @@ impl eframe::App for KenshiTradeMap {
 
                 // Hints
                 let hint_text = match &self.state {
-                    AppState::CreatingRoute(_) => "ЛКМ по городу — выбрать конец маршрута | Esc — отмена",
-                    AppState::PlacingCity => "ЛКМ на карте — разместить город | Esc — отмена",
+                    AppState::CreatingRoute(_) => texts.hint_route,
+                    AppState::PlacingCity => texts.hint_city,
                     _ => "",
                 };
 
@@ -302,21 +485,54 @@ impl eframe::App for KenshiTradeMap {
                         Color32::from_rgb(212, 164, 55),
                     );
                 }
+
+                // Load watermark on first frame if not loaded
+                if self.watermark_texture.is_none() {
+                    self.load_watermark(ctx);
+                }
+
+                // Draw watermark in bottom-right corner
+                if let Some(watermark) = &self.watermark_texture {
+                    let watermark_size = Vec2::new(100.0, 100.0);
+                    let watermark_pos = Pos2::new(
+                        rect.max.x - watermark_size.x - 10.0,
+                        rect.max.y - watermark_size.y - 10.0,
+                    );
+                    let watermark_rect = Rect::from_min_size(watermark_pos, watermark_size);
+                    
+                    // Draw watermark image
+                    painter.image(
+                        watermark.id(),
+                        watermark_rect,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    
+                    // Check if mouse is hovering over watermark
+                    if let Some(hover_pos) = response.hover_pos() {
+                        if watermark_rect.contains(hover_pos) {
+                            // Show tooltip
+                            egui::show_tooltip_at_pointer(ctx, egui::Id::new("watermark_tooltip"), |ui| {
+                                ui.label("mushoku tensei | Реинкарнация безработного");
+                            });
+                        }
+                    }
+                }
             });
 
         // Route dialog
         if self.show_route_dialog {
-            egui::Window::new("Новый маршрут")
+            egui::Window::new(texts.new_route)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(ctx, |ui| {
-                    ui.label("Название маршрута:");
+                    ui.label(texts.route_name);
                     ui.text_edit_singleline(&mut self.route_name_input);
                     
                     ui.add_space(10.0);
                     
-                    ui.label("Цвет маршрута:");
+                    ui.label(texts.route_color);
                     ui.horizontal(|ui| {
                         egui::color_picker::color_edit_button_srgba(
                             ui,
@@ -349,10 +565,10 @@ impl eframe::App for KenshiTradeMap {
                     ui.add_space(10.0);
                     
                     ui.horizontal(|ui| {
-                        if ui.button("✓ Создать").clicked() {
+                        if ui.button(texts.create).clicked() {
                             self.confirm_route_creation();
                         }
-                        if ui.button("✗ Отмена").clicked() {
+                        if ui.button(texts.cancel).clicked() {
                             self.cancel_route_creation();
                         }
                     });
@@ -361,12 +577,12 @@ impl eframe::App for KenshiTradeMap {
 
         // City name dialog
         if self.show_city_name_dialog {
-            egui::Window::new("Новый город")
+            egui::Window::new(texts.new_city)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(ctx, |ui| {
-                    ui.label("Название города:");
+                    ui.label(texts.city_name);
                     let response = ui.text_edit_singleline(&mut self.city_name_input);
                     
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -374,10 +590,10 @@ impl eframe::App for KenshiTradeMap {
                     }
                     
                     ui.horizontal(|ui| {
-                        if ui.button("✓ Подтвердить").clicked() {
+                        if ui.button(texts.confirm).clicked() {
                             self.confirm_city_creation();
                         }
-                        if ui.button("✗ Отмена").clicked() {
+                        if ui.button(texts.cancel).clicked() {
                             self.cancel_city_creation();
                         }
                     });
@@ -535,15 +751,23 @@ impl KenshiTradeMap {
                 .count();
 
             // Вычисляем смещение для маршрута
-            let mut start_point = Pos2::new(start_city.x, start_city.y);
-            let mut end_point = Pos2::new(end_city.x, end_city.y);
+            let base_start = Pos2::new(start_city.x, start_city.y);
+            let base_end = Pos2::new(end_city.x, end_city.y);
+            let mut start_point = base_start;
+            let mut end_point = base_end;
+            
+            let mut offset_x = 0.0;
+            let mut offset_y = 0.0;
             
             if existing_routes_count > 0 {
                 // Смещаем маршрут перпендикулярно линии между городами
-                let direction = (end_point - start_point).normalized();
+                let direction = (base_end - base_start).normalized();
                 let perpendicular = Vec2::new(-direction.y, direction.x);
-                let offset_distance = 15.0 * (existing_routes_count as f32); // Уменьшено с 30 до 15
+                let offset_distance = 15.0 * (existing_routes_count as f32);
                 let offset = perpendicular * offset_distance;
+                
+                offset_x = offset.x;
+                offset_y = offset.y;
                 
                 start_point += offset;
                 end_point += offset;
@@ -558,6 +782,8 @@ impl KenshiTradeMap {
                 end_city_name: end_city.name.clone(),
                 color: [self.route_color.r(), self.route_color.g(), self.route_color.b()],
                 items: Vec::new(),
+                offset_x,
+                offset_y,
             };
 
             self.routes.push(route);
@@ -622,7 +848,9 @@ impl KenshiTradeMap {
     }
 
     fn draw_trade_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Торговый маршрут");
+        let texts = Texts::get(self.language);
+        
+        ui.heading(texts.trade_route);
         
         if let Some(route_id) = self.active_route_id {
             if let Some(route) = self.routes.iter_mut().find(|r| r.id == route_id) {
@@ -637,24 +865,24 @@ impl KenshiTradeMap {
                     for (idx, item) in route.items.iter_mut().enumerate() {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label("Товар:");
+                                ui.label(texts.item);
                                 ui.text_edit_singleline(&mut item.name);
                             });
                             
                             ui.horizontal(|ui| {
-                                ui.label("Наценка Покупки %:");
+                                ui.label(texts.buy_markup);
                                 ui.add(egui::DragValue::new(&mut item.buy_markup).speed(0.5));
                             });
                             
                             ui.horizontal(|ui| {
-                                ui.label("Наценка Продажи %:");
+                                ui.label(texts.sell_markup);
                                 ui.add(egui::DragValue::new(&mut item.sell_markup).speed(0.5));
                             });
                             
                             ui.horizontal(|ui| {
-                                ui.checkbox(&mut item.hold, "Придержать");
+                                ui.checkbox(&mut item.hold, texts.hold);
                                 ui.add_space(10.0);
-                                ui.checkbox(&mut item.sell, "Продавать");
+                                ui.checkbox(&mut item.sell, texts.sell);
                             });
                             
                             ui.horizontal(|ui| {
@@ -673,7 +901,7 @@ impl KenshiTradeMap {
                 
                 ui.separator();
                 
-                if ui.button("+ Добавить товар").clicked() {
+                if ui.button(texts.add_item).clicked() {
                     route.items.push(TradeItem {
                         name: String::new(),
                         buy_markup: 0.0,
@@ -685,7 +913,7 @@ impl KenshiTradeMap {
                 
                 ui.separator();
                 
-                if ui.button("🗑️ Удалить маршрут").clicked() {
+                if ui.button(texts.delete_route).clicked() {
                     self.routes.retain(|r| r.id != route_id);
                     self.show_trade_panel = false;
                     self.active_route_id = None;
@@ -696,7 +924,7 @@ impl KenshiTradeMap {
         
         ui.separator();
         
-        if ui.button("✗ Закрыть").clicked() {
+        if ui.button(texts.close).clicked() {
             self.show_trade_panel = false;
         }
     }
@@ -728,6 +956,23 @@ impl KenshiTradeMap {
         self.camera.zoom = 0.3;
         self.camera.target_zoom = 0.3;
         self.camera.offset = Vec2::ZERO;
+    }
+
+    fn load_watermark(&mut self, ctx: &egui::Context) {
+        // Загружаем встроенную ватермарку из байтов (встроена в исполняемый файл)
+        // Это изображение нельзя удалить или изменить без перекомпиляции приложения
+        if let Ok(img) = image::load_from_memory(WATERMARK_BYTES) {
+            let size = [img.width() as usize, img.height() as usize];
+            let img_buffer = img.to_rgba8();
+            let pixels = img_buffer.as_flat_samples();
+            
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                size,
+                pixels.as_slice(),
+            );
+            
+            self.watermark_texture = Some(ctx.load_texture("watermark", color_image, Default::default()));
+        }
     }
 
     fn save_data(&self) {
@@ -768,13 +1013,19 @@ impl KenshiTradeMap {
                 if let Ok(mut data) = serde_json::from_str::<SaveData>(&content) {
                     self.cities = data.cities;
                     
-                    // Reconstruct points from city names
+                    // Reconstruct points from city names with saved offset
                     for route in &mut data.routes {
                         if let Some(start_city) = self.cities.iter().find(|c| c.name == route.start_city_name) {
-                            route.start_point = Pos2::new(start_city.x, start_city.y);
+                            route.start_point = Pos2::new(
+                                start_city.x + route.offset_x,
+                                start_city.y + route.offset_y
+                            );
                         }
                         if let Some(end_city) = self.cities.iter().find(|c| c.name == route.end_city_name) {
-                            route.end_point = Pos2::new(end_city.x, end_city.y);
+                            route.end_point = Pos2::new(
+                                end_city.x + route.offset_x,
+                                end_city.y + route.offset_y
+                            );
                         }
                     }
                     self.routes = data.routes;
